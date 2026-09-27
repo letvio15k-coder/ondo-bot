@@ -15,11 +15,8 @@ SEEN_TXS = set()
 LAST_PRICE = {"text": "", "time": 0}
 
 def get_price():
-    # Cache 60s để không bị chặn
     if time.time() - LAST_PRICE["time"] < 60 and LAST_PRICE["text"]:
         return LAST_PRICE["text"] + " (cache)"
-
-    result = ""
     try:
         url = "https://www.okx.com/api/v5/market/ticker?instId=ONDO-USDT"
         r = requests.get(url, timeout=10).json()
@@ -32,21 +29,22 @@ def get_price():
             d = r['result']['list'][0]
             result = f"🔴 ONDO: ${d['lastPrice']} ({float(d['price24hPcnt'])*100:.2f}% 24h)"
         except Exception as e:
-            result = f"Lỗi lấy giá thật: {e}"
-
+            result = f"Lỗi lấy giá: {e}"
     LAST_PRICE["text"] = result
     LAST_PRICE["time"] = time.time()
     return result
 
 def get_whales(min_value=100000, limit=5):
     try:
-        url = f"https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"
+        # FIX: Dùng API v2 mới của Etherscan, phải có chainid=1
+        url = f"https://api.etherscan.io/v2/api?chainid=1&module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"
         r = requests.get(url, timeout=15).json()
         if r['status']!= '1':
-            return None, "Chưa có ETHERSCAN_API key"
+            # Trả về lỗi thật từ Etherscan để biết nguyên nhân
+            return None, f"Etherscan báo lỗi: {r.get('message')} - {r.get('result')}"
         whales = []
         for tx in r['result']:
-            value = int(tx['value']) / 10**18
+            value = int(tx['value']) / 10**int(tx.get('tokenDecimal', '18'))
             if value >= min_value:
                 whales.append(tx)
             if len(whales) >= limit:
@@ -56,7 +54,7 @@ def get_whales(min_value=100000, limit=5):
         return None, str(e)
 
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Bot ONDO đã sẵn sàng!\n/price - xem giá\n/whale - xem cá voi >100k\n/auto_whale - bật báo cá voi tự động")
+    await update.message.reply_text("Bot ONDO đã sẵn sàng!\n/price - xem giá\n/whale - xem cá voi >100k\n/auto_whale - bật báo tự động")
 
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price())
@@ -71,7 +69,7 @@ async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     msg = "🐋 5 cá voi ONDO (>100k):\n\n"
     for tx in whales:
-        v = int(tx['value']) / 10**18
+        v = int(tx['value']) / 10**int(tx.get('tokenDecimal', '18'))
         msg += f"💰 {v:,.0f} ONDO\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
     await update.message.reply_text(msg, disable_web_page_preview=True)
 
@@ -81,7 +79,7 @@ async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
     for tx in whales:
         if tx['hash'] in SEEN_TXS: continue
         SEEN_TXS.add(tx['hash'])
-        v = int(tx['value']) / 10**18
+        v = int(tx['value']) / 10**int(tx.get('tokenDecimal', '18'))
         msg = f"🚨 CÁ VOI 100k+ ONDO!\n💰 {v:,.0f} ONDO\nhttps://etherscan.io/tx/{tx['hash']}"
         await context.bot.send_message(chat_id=context.job.chat_id, text=msg, disable_web_page_preview=True)
 

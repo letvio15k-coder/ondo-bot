@@ -11,41 +11,41 @@ app_flask = Flask(__name__)
 def home(): return "ONDO Whale Bot is running!"
 
 CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
-SEEN_TXS = set() # nhớ những tx đã báo rồi
+SEEN_TXS = set()
 
-def def get_price():
+def get_price():
     # Thử 1: Binance
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=ONDOUSDT", timeout=10).json()
-        return f"ONDO: ${r['lastPrice']} ({float(r['priceChangePercent']):.2f}% 24h)"
+        return f"🔴 ONDO: ${r['lastPrice']} ({float(r['priceChangePercent']):.2f}% 24h)"
     except:
         pass
-    # Thử 2: CoinGecko (không bị chặn)
+    # Thử 2: CoinGecko
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         url = "https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd&include_24hr_change=true"
         r = requests.get(url, headers=headers, timeout=10).json()
         price = r['ondo-finance']['usd']
         change = r['ondo-finance']['usd_24h_change']
-        return f"ONDO: ${price} ({change:.2f}% 24h) - CoinGecko"
+        return f"🔴 ONDO: ${price} ({change:.2f}% 24h) - CoinGecko"
     except:
         pass
     # Thử 3: DexScreener
     try:
-        url = "https://api.dexscreener.com/latest/dex/tokens/0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
+        url = f"https://api.dexscreener.com/latest/dex/tokens/{CONTRACT}"
         r = requests.get(url, timeout=10).json()
         price = r['pairs'][0]['priceUsd']
         change = r['pairs'][0]['priceChange']['h24']
-        return f"ONDO: ${price} ({change}% 24h) - Dex"
+        return f"🔴 ONDO: ${price} ({change}% 24h) - Dex"
     except:
         return "Lỗi lấy giá - thử lại sau 1 phút nhé!"
+
 def get_whales(min_value=100000, limit=5):
     try:
         url = f"https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"
         r = requests.get(url, timeout=15).json()
-        if r['status'] != '1':
+        if r['status']!= '1':
             return None, "Bạn chưa thêm ETHERSCAN_API key vào Render hoặc key sai."
-
         whales = []
         for tx in r['result']:
             value = int(tx['value']) / 10**18
@@ -61,23 +61,21 @@ async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price())
 
 async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    whales, err = get_whales(min_value=10000, limit=5)
+    whales, err = get_whales(min_value=100000, limit=5)
     if err:
         await update.message.reply_text(err)
         return
     if not whales:
-        await update.message.reply_text("24h qua chưa có giao dịch cá voi >10k ONDO.")
+        await update.message.reply_text("24h qua chưa có giao dịch cá voi >100k ONDO.")
         return
-    
-    msg = "🐋 5 cá voi ONDO gần nhất (>10k):\n\n"
+    msg = "🐋 5 cá voi ONDO gần nhất (>100k):\n\n"
     for tx in whales:
         value = int(tx['value']) / 10**18
         msg += f"💰 {value:,.0f} ONDO\nTừ: {tx['from'][:6]}...{tx['from'][-4:]}\nĐến: {tx['to'][:6]}...{tx['to'][-4:]}\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
     await update.message.reply_text(msg, disable_web_page_preview=True)
 
-# --- TỰ ĐỘNG BÁO CÁ VOI ---
 async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
-    whales, err = get_whales(min_value=50000, limit=3) # chỉ báo khi >50k
+    whales, err = get_whales(min_value=100000, limit=3)
     if err or not whales:
         return
     for tx in whales:
@@ -90,14 +88,12 @@ async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def auto_whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    # Nếu đang bật thì tắt
     for job in context.job_queue.get_jobs_by_name(f"whale_{chat_id}"):
         job.schedule_removal()
         await update.message.reply_text("Đã TẮT báo cá voi tự động.")
         return
-    # Bật
     context.job_queue.run_repeating(auto_whale_job, interval=300, first=0, chat_id=chat_id, name=f"whale_{chat_id}")
-    await update.message.reply_text("Đã BẬT báo cá voi tự động!\nBot sẽ tự bắn tin khi có giao dịch >50k ONDO (check mỗi 5 phút).\nGõ /auto_whale lần nữa để tắt.")
+    await update.message.reply_text("Đã BẬT báo cá voi tự động!\nBot sẽ tự bắn tin khi có giao dịch >100k ONDO (check mỗi 5 phút).\nGõ /auto_whale lần nữa để tắt.")
 
 def run_flask():
     app_flask.run(host='0.0.0.0', port=10000)

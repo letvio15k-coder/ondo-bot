@@ -1,42 +1,46 @@
-import os, requests, threading
+import os
+import threading
 from flask import Flask
+import requests
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+
 TOKEN = os.environ.get("TOKEN")
+
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "Bot ONDO dang chay 24/7"
+def home():
+    return "ONDO Bot is running!"
 
-def lay_gia_ondo():
+def get_price():
     try:
-        r = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd&include_24hr_change=true", timeout=10).json()
-        d = r['ondo-finance']; return d['usd'], d['usd_24h_change']
-    except: return 0,0
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd"
+        r = requests.get(url, timeout=10).json()
+        price = r['ondo-finance']['usd']
+        return f"ONDO: ${price}"
+    except:
+        return "Lỗi lấy giá ONDO!"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot 24/7 FREE đang chạy!\n/price xem giá\n/auto báo mỗi giờ")
 async def price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    gia,ch = lay_gia_ondo(); icon="🟢" if ch>=0 else "🔴"
-    await update.message.reply_text(f"{icon} ONDO: ${gia:.6f} ({ch:+.2f}%)")
-async def auto_send(context: ContextTypes.DEFAULT_TYPE):
-    gia,ch = lay_gia_ondo()
-    if gia:
-        await context.bot.send_message(chat_id=context.job.chat_id, text=f"⏰ ONDO: ${gia:.6f} ({ch:+.2f}%)")
+    await update.message.reply_text(get_price())
+
 async def auto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id=update.effective_chat.id
-    for job in context.job_queue.get_jobs_by_name(str(chat_id)): job.schedule_removal()
-    context.job_queue.run_repeating(auto_send, interval=3600, first=5, chat_id=chat_id, name=str(chat_id))
-    await update.message.reply_text("⏰ Đã bật báo mỗi giờ!")
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    for job in context.job_queue.get_jobs_by_name(str(update.effective_chat.id)): job.schedule_removal()
-    await update.message.reply_text("Đã tắt báo tự động.")
+    chat_id = update.effective_chat.id
+    # Xóa job cũ nếu có
+    for job in context.job_queue.get_jobs_by_name(str(chat_id)):
+        job.schedule_removal()
+    context.job_queue.run_repeating(lambda ctx: ctx.bot.send_message(chat_id=chat_id, text=f"Báo giá tự động - {get_price()}"), interval=3600, first=0, name=str(chat_id))
+    await update.message.reply_text("Đã bật báo giá tự động mỗi 1 giờ!")
 
-def run_bot():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start)); app.add_handler(CommandHandler("price", price))
-    app.add_handler(CommandHandler("auto", auto)); app.add_handler(CommandHandler("stop", stop))
-    app.run_polling()
+def run_flask():
+    app_flask.run(host='0.0.0.0', port=10000)
 
-if __name__ == "__main__":
-    threading.Thread(target=run_bot).start()
-    app_flask.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+if __name__ == '__main__':
+    # Chạy Flask ở thread phụ
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    # Chạy bot ở thread chính (sửa lỗi set_wakeup_fd)
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("price", price))
+    application.add_handler(CommandHandler("auto", auto))
+    application.run_polling(stop_signals=None, close_loop=False)

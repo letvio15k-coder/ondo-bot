@@ -2,7 +2,6 @@ import os, requests, threading
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
-
 TOKEN = os.environ.get("TOKEN")
 app_flask = Flask(__name__)
 @app_flask.route('/')

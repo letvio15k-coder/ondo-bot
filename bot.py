@@ -1,4 +1,4 @@
-import os, threading, requests
+import os, threading, requests, time
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
@@ -12,32 +12,31 @@ def home(): return "ONDO Whale Bot is running!"
 
 CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
 SEEN_TXS = set()
+LAST_PRICE = {"text": "", "time": 0}
 
 def get_price():
-    # OKX - không chặn, chạy ngon nhất
+    # Cache 60s để không bị chặn
+    if time.time() - LAST_PRICE["time"] < 60 and LAST_PRICE["text"]:
+        return LAST_PRICE["text"] + " (cache)"
+
+    result = ""
     try:
         url = "https://www.okx.com/api/v5/market/ticker?instId=ONDO-USDT"
         r = requests.get(url, timeout=10).json()
         data = r['data'][0]
-        return f"🔴 ONDO: ${data['last']} ({float(data['volCcy24h']):,.0f} vol 24h)"
-    except Exception as e:
-        print(f"OKX fail: {e}")
-    # Bybit
-    try:
-        url = "https://api.bybit.com/v5/market/tickers?category=spot&symbol=ONDOUSDT"
-        r = requests.get(url, timeout=10).json()
-        d = r['result']['list'][0]
-        return f"🔴 ONDO: ${d['lastPrice']} ({float(d['price24hPcnt'])*100:.2f}% 24h)"
-    except Exception as e:
-        print(f"Bybit fail: {e}")
-    # CoinGecko cuối cùng
-    try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd"
-        r = requests.get(url, timeout=10, headers={'User-Agent':'Mozilla/5.0'}).json()
-        return f"🔴 ONDO: ${r['ondo-finance']['usd']} (CoinGecko)"
-    except Exception as e:
-        print(f"CG fail: {e}")
-        return f"Lỗi lấy giá thật: {e}"
+        result = f"🔴 ONDO: ${data['last']} (Vol 24h: {float(data['volCcy24h']):,.0f})"
+    except:
+        try:
+            url = "https://api.bybit.com/v5/market/tickers?category=spot&symbol=ONDOUSDT"
+            r = requests.get(url, timeout=10).json()
+            d = r['result']['list'][0]
+            result = f"🔴 ONDO: ${d['lastPrice']} ({float(d['price24hPcnt'])*100:.2f}% 24h)"
+        except Exception as e:
+            result = f"Lỗi lấy giá thật: {e}"
+
+    LAST_PRICE["text"] = result
+    LAST_PRICE["time"] = time.time()
+    return result
 
 def get_whales(min_value=100000, limit=5):
     try:
@@ -55,6 +54,9 @@ def get_whales(min_value=100000, limit=5):
         return whales, None
     except Exception as e:
         return None, str(e)
+
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Bot ONDO đã sẵn sàng!\n/price - xem giá\n/whale - xem cá voi >100k\n/auto_whale - bật báo cá voi tự động")
 
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price())
@@ -90,7 +92,7 @@ async def auto_whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Đã TẮT báo cá voi.")
         return
     context.job_queue.run_repeating(auto_whale_job, interval=300, first=0, chat_id=chat_id, name=f"whale_{chat_id}")
-    await update.message.reply_text("Đã BẬT báo cá voi >100k (5p check).")
+    await update.message.reply_text("Đã BẬT báo cá voi >100k ONDO (check mỗi 5 phút).")
 
 def run_flask():
     port = int(os.environ.get("PORT", 10000))
@@ -100,6 +102,7 @@ if __name__ == '__main__':
     threading.Thread(target=run_flask, daemon=True).start()
     print("ONDO Whale Bot is starting...")
     application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("price", price_cmd))
     application.add_handler(CommandHandler("whale", whale_cmd))
     application.add_handler(CommandHandler("auto_whale", auto_whale_cmd))

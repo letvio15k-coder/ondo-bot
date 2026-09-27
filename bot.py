@@ -13,13 +13,32 @@ def home(): return "ONDO Whale Bot is running!"
 CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
 SEEN_TXS = set() # nhớ những tx đã báo rồi
 
-def get_price():
+def def get_price():
+    # Thử 1: Binance
     try:
         r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=ONDOUSDT", timeout=10).json()
         return f"ONDO: ${r['lastPrice']} ({float(r['priceChangePercent']):.2f}% 24h)"
     except:
-        return "Lỗi lấy giá"
-
+        pass
+    # Thử 2: CoinGecko (không bị chặn)
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd&include_24hr_change=true"
+        r = requests.get(url, headers=headers, timeout=10).json()
+        price = r['ondo-finance']['usd']
+        change = r['ondo-finance']['usd_24h_change']
+        return f"ONDO: ${price} ({change:.2f}% 24h) - CoinGecko"
+    except:
+        pass
+    # Thử 3: DexScreener
+    try:
+        url = "https://api.dexscreener.com/latest/dex/tokens/0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
+        r = requests.get(url, timeout=10).json()
+        price = r['pairs'][0]['priceUsd']
+        change = r['pairs'][0]['priceChange']['h24']
+        return f"ONDO: ${price} ({change}% 24h) - Dex"
+    except:
+        return "Lỗi lấy giá - thử lại sau 1 phút nhé!"
 def get_whales(min_value=100000, limit=5):
     try:
         url = f"https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"

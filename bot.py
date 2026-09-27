@@ -20,7 +20,7 @@ def get_price():
     except:
         return "Lỗi lấy giá"
 
-def get_whales(min_value=10000, limit=5):
+def get_whales(min_value=100000, limit=5):
     try:
         url = f"https://api.etherscan.io/api?module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"
         r = requests.get(url, timeout=15).json()

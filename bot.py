@@ -14,31 +14,37 @@ CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
 SEEN_TXS = set()
 
 def get_price():
-    # Thử 1: Binance
+    errors = []
+    # Thử 1: Binance VISION - link này không bị chặn
     try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=ONDOUSDT", timeout=10).json()
+        url = "https://data-api.binance.vision/api/v3/ticker/24hr?symbol=ONDOUSDT"
+        r = requests.get(url, timeout=10).json()
         return f"🔴 ONDO: ${r['lastPrice']} ({float(r['priceChangePercent']):.2f}% 24h)"
-    except:
-        pass
-    # Thử 2: CoinGecko
+    except Exception as e:
+        errors.append(f"Binance Vision: {e}")
+
+    # Thử 2: Bybit - cũng không chặn
+    try:
+        url = "https://api.bybit.com/v5/market/tickers?category=spot&symbol=ONDOUSDT"
+        r = requests.get(url, timeout=10).json()
+        data = r['result']['list'][0]
+        return f"🔴 ONDO: ${data['lastPrice']} ({float(data['price24hPcnt'])*100:.2f}% 24h) Bybit"
+    except Exception as e:
+        errors.append(f"Bybit: {e}")
+
+    # Thử 3: CoinGecko
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         url = "https://api.coingecko.com/api/v3/simple/price?ids=ondo-finance&vs_currencies=usd&include_24hr_change=true"
-        r = requests.get(url, headers=headers, timeout=10).json()
+        r = requests.get(url, headers=headers, timeout=15).json()
         price = r['ondo-finance']['usd']
         change = r['ondo-finance']['usd_24h_change']
-        return f"🔴 ONDO: ${price} ({change:.2f}% 24h) - CoinGecko"
-    except:
-        pass
-    # Thử 3: DexScreener
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/tokens/{CONTRACT}"
-        r = requests.get(url, timeout=10).json()
-        price = r['pairs'][0]['priceUsd']
-        change = r['pairs'][0]['priceChange']['h24']
-        return f"🔴 ONDO: ${price} ({change}% 24h) - Dex"
-    except:
-        return "Lỗi lấy giá - thử lại sau 1 phút nhé!"
+        return f"🔴 ONDO: ${price} ({change:.2f}% 24h) CG"
+    except Exception as e:
+        errors.append(f"CG: {e}")
+
+    print("LOI LAY GIA:", errors) # in ra log Render để mình xem
+    return f"Lỗi lấy giá. Chi tiết log: {errors[0] if errors else 'unknown'}"
 
 def get_whales(min_value=100000, limit=5):
     try:
@@ -60,6 +66,13 @@ def get_whales(min_value=100000, limit=5):
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price())
 
+async def debug_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        r = requests.get("https://data-api.binance.vision/api/v3/ticker/24hr?symbol=ONDOUSDT", timeout=10)
+        await update.message.reply_text(f"Debug OK: status {r.status_code}\n{r.text[:500]}")
+    except Exception as e:
+        await update.message.reply_text(f"Debug Lỗi: {e}")
+
 async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     whales, err = get_whales(min_value=100000, limit=5)
     if err:
@@ -71,7 +84,7 @@ async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "🐋 5 cá voi ONDO gần nhất (>100k):\n\n"
     for tx in whales:
         value = int(tx['value']) / 10**18
-        msg += f"💰 {value:,.0f} ONDO\nTừ: {tx['from'][:6]}...{tx['from'][-4:]}\nĐến: {tx['to'][:6]}...{tx['to'][-4:]}\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
+        msg += f"💰 {value:,.0f} ONDO\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
     await update.message.reply_text(msg, disable_web_page_preview=True)
 
 async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
@@ -83,17 +96,17 @@ async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
             continue
         SEEN_TXS.add(tx['hash'])
         value = int(tx['value']) / 10**18
-        msg = f"🚨 CÁ VOI ONDO VỪA CHUYỂN!\n\n💰 {value:,.0f} ONDO\nTừ: {tx['from']}\nĐến: {tx['to']}\n\nhttps://etherscan.io/tx/{tx['hash']}"
+        msg = f"🚨 CÁ VOI ONDO!\n💰 {value:,.0f} ONDO\nhttps://etherscan.io/tx/{tx['hash']}"
         await context.bot.send_message(chat_id=context.job.chat_id, text=msg, disable_web_page_preview=True)
 
 async def auto_whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     for job in context.job_queue.get_jobs_by_name(f"whale_{chat_id}"):
         job.schedule_removal()
-        await update.message.reply_text("Đã TẮT báo cá voi tự động.")
+        await update.message.reply_text("Đã TẮT báo cá voi.")
         return
     context.job_queue.run_repeating(auto_whale_job, interval=300, first=0, chat_id=chat_id, name=f"whale_{chat_id}")
-    await update.message.reply_text("Đã BẬT báo cá voi tự động!\nBot sẽ tự bắn tin khi có giao dịch >100k ONDO (check mỗi 5 phút).\nGõ /auto_whale lần nữa để tắt.")
+    await update.message.reply_text("Đã BẬT báo cá voi >100k (5p check 1 lần).")
 
 def run_flask():
     app_flask.run(host='0.0.0.0', port=10000)
@@ -104,4 +117,5 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("price", price_cmd))
     application.add_handler(CommandHandler("whale", whale_cmd))
     application.add_handler(CommandHandler("auto_whale", auto_whale_cmd))
+    application.add_handler(CommandHandler("debug", debug_cmd))
     application.run_polling(stop_signals=None, close_loop=False)

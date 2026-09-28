@@ -8,18 +8,47 @@ ETHERSCAN_API = os.environ.get("ETHERSCAN_API")
 
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "ONDO Bot running!"
+def home(): return "ONDO Whale Pro running!"
 
 CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
 SEEN_TXS = set()
 LAST_PRICE = {"text": "", "time": 0, "price": 0}
-PRICE_HISTORY = [] # lưu giá 15p để tính biến động
+PRICE_HISTORY = []
+
+# Ví nóng các sàn lớn trên Ethereum
+EXCHANGE_WALLETS = {
+    "0x28c6c06298d514db089934071355e5743bf21d60": "Binance 14",
+    "0x21a31ee1afc51d94c2efccaa2092ad1028285549": "Binance 15",
+    "0xdfd5293d8eb6f1f10008e494abea82c400cf762f": "Binance 16",
+    "0xbeab2072183cc0eb44da95f5dcc6ebc0d5d93f06": "Binance 17",
+    "0x71660c4005ba2814f82cbeae2e7b0fbba0d07100": "Coinbase",
+    "0x4d2211dc33dccad2d33e688a60fbba72f7dc91d4": "Coinbase",
+    "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43": "Coinbase",
+    "0x28a9ad368259ba7c32ccb76a804f46309e859345": "OKX",
+    "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b": "OKX",
+    "0x75e89d5979e65f60f77756a337d4649a07a6e61f": "Bybit",
+    "0xf977814e90da44bfa03b6295a0616a897441ace": "Bybit",
+}
+
+def get_wallet_label(addr):
+    if not addr: return "Unknown"
+    low = addr.lower()
+    if low in EXCHANGE_WALLETS:
+        return f"🏦 {EXCHANGE_WALLETS[low]}"
+    # check có phải contract không (Uniswap, v.v.)
+    try:
+        url = f"https://api.etherscan.io/v2/api?chainid=1&module=proxy&action=eth_getCode&address={addr}&apikey={ETHERSCAN_API}"
+        r = requests.get(url, timeout=10).json()
+        if r.get('result') and r['result']!= '0x' and r['result']!= '0x0':
+            return "📜 Contract/DEX"
+    except: pass
+    return "🐋 Ví cá nhân"
 
 def get_price_ondo_raw():
     headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         r = requests.get("https://data-api.binance.vision/api/v3/ticker/price?symbol=ONDOUSDT", headers=headers, timeout=10).json()
-        return float(r['price']), f"Binance"
+        return float(r['price']), "Binance"
     except:
         try:
             r = requests.get("https://min-api.cryptocompare.com/data/price?fsym=ONDO&tsyms=USD", headers=headers, timeout=10).json()
@@ -36,9 +65,7 @@ def get_price_ondo():
         price, source = get_price_ondo_raw()
         text = f"🔴 ONDO: ${price:.5f} ({source})"
         LAST_PRICE.update({"text": text, "time": now, "price": price})
-        # Lưu lịch sử giá
         PRICE_HISTORY.append((now, price))
-        # Chỉ giữ 2 tiếng gần nhất
         PRICE_HISTORY[:] = [(t,p) for t,p in PRICE_HISTORY if now - t < 7200]
         return text
     except Exception as e:
@@ -47,43 +74,20 @@ def get_price_ondo():
 def get_price_change_15m():
     if len(PRICE_HISTORY) < 2: return 0
     now = time.time()
-    # tìm giá cách đây ~15 phút
     old_price = None
     for t,p in reversed(PRICE_HISTORY):
-        if now - t >= 900: # 15p
+        if now - t >= 900:
             old_price = p
             break
     if not old_price: old_price = PRICE_HISTORY[0][1]
-    current = LAST_PRICE.get("price", old_price)
-    if old_price == 0: return 0
-    return (current - old_price) / old_price * 100
-
-def get_ondo_signal():
-    try:
-        url = "https://www.okx.com/api/v5/market/candles?instId=ONDO-USDT&bar=1H&limit=100"
-        r = requests.get(url, timeout=10).json()
-        data = r['data'][::-1]
-        closes = [float(x[4]) for x in data]
-        price = closes[-1]
-        gains = [max(closes[i]-closes[i-1],0) for i in range(1,len(closes))]
-        losses = [max(closes[i-1]-closes[i],0) for i in range(1,len(closes))]
-        avg_gain = sum(gains[-14:])/14
-        avg_loss = sum(losses[-14:])/14 or 0.00001
-        rsi = 100 - (100/(1+avg_gain/avg_loss))
-        ema20 = sum(closes[-20:])/20
-        ema50 = sum(closes[-50:])/50
-        if rsi < 30: return f"📊 ONDO ${price:.4f} RSI:{rsi:.1f}\n🟢🟢 BUY MẠNH - Quá bán"
-        elif rsi > 70: return f"📊 ONDO ${price:.4f} RSI:{rsi:.1f}\n🔴🔴 SELL MẠNH - Quá mua"
-        elif ema20 > ema50: return f"📊 ONDO ${price:.4f} RSI:{rsi:.1f}\n🟢 BUY - EMA20>EMA50"
-        else: return f"📊 ONDO ${price:.4f} RSI:{rsi:.1f}\n🔴 SELL/NEUTRAL - EMA20<EMA50"
-    except Exception as e:
-        return f"Lỗi tín hiệu: {e}"
+    current = LAST_PRICE.get("price", old_price) or old_price
+    return (current - old_price) / old_price * 100 if old_price else 0
 
 def get_whales():
     try:
         url = f"https://api.etherscan.io/v2/api?chainid=1&module=account&action=tokentx&contractaddress={CONTRACT}&page=1&offset=20&sort=desc&apikey={ETHERSCAN_API}"
         r = requests.get(url, timeout=15).json()
-        if r['status']!= '1': return None, f"Etherscan: {r.get('message')}"
+        if r['status']!= '1': return None, f"Etherscan: {r.get('result')}"
         whales=[]
         for tx in r['result']:
             v = int(tx['value']) / 10**18
@@ -93,24 +97,23 @@ def get_whales():
     except Exception as e:
         return None, str(e)
 
+# --- COMMANDS ---
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("/price - giá\n/signal - tín hiệu\n/whale - cá voi >100k\n/auto_whale - bật auto cá voi kèm giá\n/auto_signal - bật auto tín hiệu")
+    await update.message.reply_text("Bot ONDO Phan Rang PRO\n/price\n/whale\n/auto_whale - kèm ví sàn")
 
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price_ondo())
 
-async def signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(get_ondo_signal())
-
 async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     whales, err = get_whales()
     if err: await update.message.reply_text(err); return
-    if not whales: await update.message.reply_text("Chưa có giao dịch >100k"); return
-    price_now = get_price_ondo()
-    msg=f"{price_now}\n\n🐋 Cá voi ONDO >100k:\n\n"
+    if not whales: await update.message.reply_text("Chưa có >100k"); return
+    msg = get_price_ondo() + "\n\n🐋 Cá voi ONDO >100k:\n\n"
     for tx in whales:
         v=int(tx['value'])/10**18
-        msg+=f"💰 {v:,.0f} ONDO (~${v*LAST_PRICE.get('price',0.57):,.0f})\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
+        from_label = get_wallet_label(tx['from'])
+        to_label = get_wallet_label(tx['to'])
+        msg+=f"💰 {v:,.0f} ONDO\nTừ: {from_label}\nĐến: {to_label}\nhttps://etherscan.io/tx/{tx['hash']}\n\n"
     await update.message.reply_text(msg, disable_web_page_preview=True)
 
 async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
@@ -120,49 +123,48 @@ async def auto_whale_job(context: ContextTypes.DEFAULT_TYPE):
         if tx['hash'] in SEEN_TXS: continue
         SEEN_TXS.add(tx['hash'])
         v=int(tx['value'])/10**18
-        # Lấy giá lúc cá voi chuyển
         try:
             price_val, source = get_price_ondo_raw()
             usd_val = v * price_val
             change_15m = get_price_change_15m()
-            trend = "🔺 Đang GOM" if change_15m > 0 else "🔻 Đang XẢ"
-            if abs(change_15m) < 0.3: trend = "➡️ Đi ngang"
+
+            from_addr = tx['from']
+            to_addr = tx['to']
+            from_label = get_wallet_label(from_addr)
+            to_label = get_wallet_label(to_addr)
+
+            # Phân tích hành động
+            action = "🔄 Chuyển ví"
+            if "🏦" in from_label and "🐋" in to_label: action = "✅ RÚT KHỎI SÀN - Đang GOM 🟢"
+            elif "🐋" in from_label and "🏦" in to_label: action = "⚠️ NẠP LÊN SÀN - Có thể XẢ 🔴"
+            elif "🏦" in from_label and "🏦" in to_label: action = "🏦 Chuyển giữa các sàn"
+
+            trend = "Đi ngang"
+            if change_15m > 0.5: trend = "Đang tăng"
+            elif change_15m < -0.5: trend = "Đang giảm"
 
             msg = (f"🚨 CÁ VOI 100k+ ONDO!\n"
                    f"💰 {v:,.0f} ONDO (~${usd_val:,.0f})\n"
                    f"💵 Giá lúc chuyển: ${price_val:.5f} ({source})\n"
-                   f"📊 Biến động 15p trước: {change_15m:+.2f}% {trend}\n"
+                   f"📊 15p trước: {change_15m:+.2f}% ({trend})\n\n"
+                   f"Từ: {from_label}\n`{from_addr[:10]}...`\n"
+                   f"Đến: {to_label}\n`{to_addr[:10]}...`\n\n"
+                   f"👉 {action}\n"
                    f"https://etherscan.io/tx/{tx['hash']}")
-            await context.bot.send_message(chat_id=context.job.chat_id, text=msg, disable_web_page_preview=True)
-            # Cập nhật cache giá
+            await context.bot.send_message(chat_id=context.job.chat_id, text=msg, disable_web_page_preview=True, parse_mode='Markdown')
             get_price_ondo()
         except Exception as e:
-            print(f"whale job error {e}")
-
-async def auto_signal_job(context: ContextTypes.DEFAULT_TYPE):
-    sig = get_ondo_signal()
-    if "MẠNH" in sig or "BREAKOUT" in sig:
-        await context.bot.send_message(chat_id=context.job.chat_id, text=f"🚨 AUTO ONDO\n{sig}")
+            print(f"whale error {e}")
 
 async def auto_whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id=update.effective_chat.id
     jobs=context.job_queue.get_jobs_by_name(f"whale_{chat_id}")
     if jobs:
         for j in jobs: j.schedule_removal()
-        await update.message.reply_text("Đã TẮT auto cá voi")
+        await update.message.reply_text("Đã TẮT auto cá voi PRO")
         return
     context.job_queue.run_repeating(auto_whale_job, interval=300, first=5, chat_id=chat_id, name=f"whale_{chat_id}")
-    await update.message.reply_text("Đã BẬT auto cá voi >100k kèm giá lúc chuyển + biến động 15p!")
-
-async def auto_signal_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id=update.effective_chat.id
-    jobs=context.job_queue.get_jobs_by_name(f"sig_{chat_id}")
-    if jobs:
-        for j in jobs: j.schedule_removal()
-        await update.message.reply_text("Đã TẮT auto tín hiệu")
-        return
-    context.job_queue.run_repeating(auto_signal_job, interval=900, first=5, chat_id=chat_id, name=f"sig_{chat_id}")
-    await update.message.reply_text("Đã BẬT auto tín hiệu ONDO")
+    await update.message.reply_text("Đã BẬT auto cá voi PRO!\nKèm: Giá + USD + % 15p + Ví sàn (Binance/Coinbase/Ví cá nhân) + Phân tích Gom/Xả")
 
 def run_flask():
     app_flask.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
@@ -172,9 +174,7 @@ if __name__ == '__main__':
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start_cmd))
     app.add_handler(CommandHandler("price", price_cmd))
-    app.add_handler(CommandHandler("signal", signal_cmd))
     app.add_handler(CommandHandler("whale", whale_cmd))
     app.add_handler(CommandHandler("auto_whale", auto_whale_cmd))
-    app.add_handler(CommandHandler("auto_signal", auto_signal_cmd))
-    print("ONDO Bot starting...")
+    print("ONDO Bot PRO starting...")
     app.run_polling(stop_signals=None, close_loop=False)

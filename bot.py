@@ -8,7 +8,7 @@ ETHERSCAN_API = os.environ.get("ETHERSCAN_API")
 
 app_flask = Flask(__name__)
 @app_flask.route('/')
-def home(): return "ONDO Bot PRO Full 9 Lenh Running!"
+def home(): return "ONDO Bot 9 Lenh Fixed Running!"
 
 CONTRACT = "0xfAbA6f8e4a5E8Ab82F62fe7C39859FA577269BE3"
 SEEN_TXS = set()
@@ -108,21 +108,18 @@ def get_whales():
 
 def get_top_holders():
     try:
-        url = f"https://api.etherscan.io/v2/api?chainid=1&module=token&action=tokenholderlist&contractaddress={CONTRACT}&page=1&offset=100&apikey={ETHERSCAN_API}"
+        url = f"https://api.ethplorer.io/getTopTokenHolders/{CONTRACT}?apiKey=freekey"
         r = requests.get(url, timeout=20).json()
-        if r['status']!= '1' or 'result' not in r:
-            return None, f"Lỗi Top: {r.get('message')} {r.get('result')}"
-        return r['result'], None
+        if 'holders' not in r: return None, f"Lỗi: {r}"
+        return r['holders'], None
     except Exception as e: return None, str(e)
 
 # --- COMMANDS ---
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 Bot ONDO Phan Rang PRO - 9 Lệnh\n\n"
-        "Xem nhanh:\n"
-        "/price - giá\n/whale - cá voi\n/signal - tín hiệu\n/top - Top 10 ví\n/top100 - thống kê Top 100\n\n"
-        "AUTO (bấm lần nữa để TẮT):\n"
-        "/auto_price - giá 1h\n/auto_whale - cá voi PRO 5p\n/auto_signal - tín hiệu 15p"
+        "🤖 Bot ONDO Phan Rang PRO - 9 Lệnh FIX\n\n"
+        "Xem nhanh:\n/price - giá\n/whale - cá voi\n/signal - tín hiệu\n/top - Top 10 ví\n/top100 - thống kê Top 100\n\n"
+        "AUTO:\n/auto_price - giá 1h\n/auto_whale - cá voi 5p\n/auto_signal - tín hiệu 15p"
     )
 async def price_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_price_ondo())
@@ -139,26 +136,27 @@ async def whale_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, disable_web_page_preview=True)
 
 async def top_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("⏳ Đang lấy Top 100 ví ONDO...")
+    await update.message.reply_text("⏳ Đang lấy Top 100 ví ONDO (Free API)...")
     holders, err = get_top_holders()
     if err: await update.message.reply_text(err); return
+    if not holders: await update.message.reply_text("Không lấy được"); return
     msg = "🐋 TOP 10 VÍ NẮM ONDO:\n\n"
     for i, h in enumerate(holders[:10], 1):
-        addr = h['TokenHolderAddress']; bal = float(h['TokenHolderQuantity']); percent = bal / 10_000_000_000 * 100
+        addr = h['address']; bal = float(h['balance']) / 10**18; percent = float(h['share'])
         label = get_wallet_label(addr); short = f"{addr[:6]}...{addr[-4:]}"
         msg += f"{i}. {label} {short}\n💰 {bal:,.0f} ({percent:.2f}%)\n\n"
-    top10_total = sum(float(h['TokenHolderQuantity']) for h in holders[:10])/10_000_000_000*100
-    top100_total = sum(float(h['TokenHolderQuantity']) for h in holders)/10_000_000_000*100
+    top10_total = sum(float(x['share']) for x in holders[:10])
+    top100_total = sum(float(x['share']) for x in holders[:100])
     msg += f"📊 Top10: {top10_total:.2f}% | Top100: {top100_total:.2f}%"
     await update.message.reply_text(msg)
 
 async def top100_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     holders, err = get_top_holders()
     if err: await update.message.reply_text(err); return
-    def calc(n): return sum(float(h['TokenHolderQuantity']) for h in holders[:n]) / 10_000_000_000 * 100
+    def calc(n): return sum(float(x['share']) for x in holders[:n])
     top10, top20, top50, top100 = calc(10), calc(20), calc(50), calc(100)
-    status = "🔒 Tập trung cao - dễ làm giá" if top10 > 60 else "✅ Phân tán tốt" if top10 < 40 else "⚠️ Trung bình"
-    msg = (f"📈 PHÂN BỔ ONDO (10B)\n\nTop 10: {top10:.2f}%\nTop 20: {top20:.2f}%\nTop 50: {top50:.2f}%\nTop 100: {top100:.2f}%\n\n{status}")
+    status = "🔒 Tập trung cao" if top10 > 60 else "✅ Phân tán tốt" if top10 < 40 else "⚠️ Trung bình"
+    msg = f"📈 PHÂN BỔ ONDO (10B)\n\nTop 10: {top10:.2f}%\nTop 20: {top20:.2f}%\nTop 50: {top50:.2f}%\nTop 100: {top100:.2f}%\n\n{status}"
     await update.message.reply_text(msg)
 
 # --- JOBS ---
@@ -225,5 +223,5 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler("auto_price", auto_price_cmd))
     app.add_handler(CommandHandler("auto_whale", auto_whale_cmd))
     app.add_handler(CommandHandler("auto_signal", auto_signal_cmd))
-    print("ONDO Bot 9 lenh starting...")
+    print("ONDO Bot 9 lenh FIX starting...")
     app.run_polling(stop_signals=None, close_loop=False)
